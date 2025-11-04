@@ -26,3 +26,22 @@ def get_r3m(name, **kwargs):
     resnet_model = r3m_model.convnet
     resnet_model = resnet_model.to('cpu')
     return resnet_model
+
+def get_language_model(name="distilbert-base-uncased", dtype=torch.float16, **kwargs):
+    """
+    name: bert-base-uncased, roberta-base
+    """
+    from transformers import AutoModel, AutoTokenizer
+
+    model = AutoModel.from_pretrained(name, torch_dtype=dtype, **kwargs)
+    tokenizer = AutoTokenizer.from_pretrained(name)
+    def encode_fn(text: str, device='cuda'):
+        model.to(device)
+        inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True).to(device)
+        with torch.no_grad():
+            outputs = model(**inputs)
+        # use CLS token
+        embeddings = outputs.last_hidden_state.sum(1).squeeze().to(torch.float32).cpu().numpy()
+        return embeddings
+
+    return encode_fn

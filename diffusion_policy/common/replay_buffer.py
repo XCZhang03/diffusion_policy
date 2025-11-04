@@ -1,4 +1,4 @@
-from typing import Union, Dict, Optional
+from typing import Union, Dict, Optional, List
 import os
 import math
 import numbers
@@ -224,6 +224,80 @@ class ReplayBuffer:
         return cls.copy_from_store(src_store=group.store, store=store, 
             keys=keys, chunks=chunks, compressors=compressors, 
             if_exists=if_exists, **kwargs)
+    
+    @classmethod
+    def merge_buffers(cls, buffers: List, store=None):
+        assert all([isinstance(buf, ReplayBuffer) and buf.n_steps > 0 for buf in buffers])
+        keys = list(buffers[0].keys())
+        assert all(set(buf.keys()) == set(keys) for buf in buffers)
+        
+        chunks = buffers[0].get_chunks() if buffers[0].backend == 'zarr' else dict()
+        compressors = buffers[0].get_compressors() if buffers[0].backend == 'zarr' else dict()
+
+        # data format info for all keys
+        template_info = {}
+        for k in keys:
+            arr = buffers[0][k]
+            template_info[k] = (
+                arr.dtype,
+                arr.shape[1:],
+                arr
+            )
+            assert all(buf[k].shape[1:] == arr.shape[1:] and buf[k].dtype == arr.dtype for buf in buffers)
+
+        total_steps = sum(buf.n_steps for buf in buffers)
+
+        # Create destination buffer
+        dst = cls.create_empty_zarr(storage=store)
+        data_group = dst.data
+        meta_group = dst.meta
+        # Pre-create data arrays with chosen chunks/compressors
+        for k in keys:
+            dtype_key, shape_key, arr_key = template_info[k]
+            out_shape = (total_steps,) + shape_key
+            if len(out_shape) == 2: # low dim keys
+                cks = out_shape
+                cpr = None
+            else: # image keys
+                cks = (1, *out_shape[1:])
+                cpr = arr_key.compressor if isinstance(arr_key, zarr.Array) else self._resolve_array_compressor(
+                    compressors=compressors, key=k, array=arr_key)
+            _ = data_group.zeros(
+                name=k,
+                shape=out_shape,
+                chunks=cks,
+                dtype=dtype_key,
+                compressor=cpr,
+                overwrite=True,
+            )
+        
+        # Build episode_ends
+        all_lengths = []
+        for buf in buffers:
+            all_lengths.append(buf.episode_lengths)
+        all_lengths = np.concatenate(all_lengths).astype(np.int64, copy=False)
+        # Resize and assign
+        ep = dst.episode_ends
+        ep.resize(all_lengths.shape[0])
+        ep[:] = np.cumsum(all_lengths, dtype=np.int64)
+        # Optionally rechunk episode_ends to avoid too-small chunks
+        if ep.chunks[0] < ep.shape[0]:
+            rechunk_recompress_array(meta_group, 'episode_ends',
+                                        chunk_length=int(ep.shape[0] * 1.5))
+        
+        # Copy data from source buffers
+        dst_start = 0
+        import tqdm
+        for buf in tqdm.tqdm(buffers):
+            n = buf.n_steps
+            dst_end = dst_start + n
+            for k in keys:
+                src_arr = buf.data[k]
+                dst_arr = dst.data[k]
+                dst_arr[dst_start:dst_end] = src_arr[:n]
+            dst_start = dst_end
+
+        return dst
 
     # ============= save methods ===============
     def save_to_store(self, store, 

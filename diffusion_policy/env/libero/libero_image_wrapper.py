@@ -1,20 +1,23 @@
+import os
 from typing import List, Optional
 from matplotlib.pyplot import fill
 import numpy as np
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium import spaces
 from omegaconf import OmegaConf
-from robomimic.envs.env_robosuite import EnvRobosuite
+from libero.libero.envs.bddl_base_domain import BDDLBaseDomain
 
-class RobomimicImageWrapper(gym.Env):
+class LIBEROImageWrapper(gym.Env):
     def __init__(self, 
-        env: EnvRobosuite,
+        env: BDDLBaseDomain,
         shape_meta: dict,
         init_state: Optional[np.ndarray]=None,
         render_obs_key='agentview_image',
         ):
 
         self.env = env
+        self.language_instruction = " ".join(env.parsed_problem['language_instruction'])
+        self.problem_name = env.parsed_problem['problem_name']
         self.render_obs_key = render_obs_key
         self.init_state = init_state
         self.seed_state_map = dict()
@@ -46,6 +49,8 @@ class RobomimicImageWrapper(gym.Env):
             elif key.endswith('pos'):
                 # better range?
                 min_value, max_value = -1, 1
+            elif key.endswith('embed'):
+                min_value, max_value = -np.inf, np.inf
             else:
                 raise RuntimeError(f"Unsupported type {key}")
             
@@ -58,17 +63,26 @@ class RobomimicImageWrapper(gym.Env):
             observation_space[key] = this_space
         self.observation_space = observation_space
 
+        if 'lang_embed' in shape_meta['obs'].keys():
+            from diffusion_policy.common.libero_utils import LANG_EMBED_CACHE_FILE
+            lang_embed_cache = dict(np.load(LANG_EMBED_CACHE_FILE)) if os.path.exists(LANG_EMBED_CACHE_FILE) else dict()
+            self.lang_embed = lang_embed_cache.get(self.language_instruction, None)
+            if self.lang_embed is None:
+                raise RuntimeError('Language embed not found in cache.')
+
 
     def get_observation(self, raw_obs=None):
         if raw_obs is None:
             raw_obs = self.env.get_observation()
-        
-        self.render_cache = raw_obs[self.render_obs_key]
+
+        self.render_cache = raw_obs[self.render_obs_key][::-1]
 
         obs = dict()
         for key in self.observation_space.keys():
             if key.endswith('image'):
                 obs[key] = np.moveaxis(raw_obs[key][::-1], -1, 0) / 255.0
+            elif key == 'lang_embed':
+                obs[key] = self.lang_embed
             else:
                 obs[key] = raw_obs[key]
         return obs
@@ -76,8 +90,17 @@ class RobomimicImageWrapper(gym.Env):
     def seed(self, seed=None):
         np.random.seed(seed=seed)
         self._seed = seed
-    
-    def reset(self):
+
+    def reset_to(self, mujoco_state):
+        self.env.sim.set_state_from_flattened(mujoco_state)
+        self.env.sim.forward()
+        self.env._check_success()
+        self.env._post_process()
+        self.env._update_observables(force=True)
+        raw_obs = self.env._get_observations()
+        return raw_obs
+
+    def reset(self, **kwargs):
         if self.init_state is not None:
             if not self.has_reset_before:
                 # the env must be fully reset at least once to ensure correct rendering
@@ -86,18 +109,18 @@ class RobomimicImageWrapper(gym.Env):
 
             # always reset to the same state
             # to be compatible with gym
-            raw_obs = self.env.reset_to({'states': self.init_state})
+            raw_obs = self.reset_to(self.init_state)
         elif self._seed is not None:
             # reset to a specific seed
             seed = self._seed
             if seed in self.seed_state_map:
                 # env.reset is expensive, use cache
-                raw_obs = self.env.reset_to({'states': self.seed_state_map[seed]})
+                raw_obs = self.reset_to(self.seed_state_map[seed])
             else:
                 # robosuite's initializes all use numpy global random state
                 np.random.seed(seed=seed)
                 raw_obs = self.env.reset()
-                state = self.env.get_state()['states']
+                state = self.env.sim.get_state().flatten()
                 self.seed_state_map[seed] = state
             self._seed = None
         else:
@@ -116,42 +139,47 @@ class RobomimicImageWrapper(gym.Env):
     def render(self, mode='rgb_array'):
         if self.render_cache is None:
             raise RuntimeError('Must run reset or step before render.')
-        img = np.moveaxis(self.render_cache, 0, -1)
-        img = (img * 255).astype(np.uint8)
+        img = self.render_cache
         return img
 
 
-def test():
+# def test():
+if __name__ == "__main__":
     import os
     from omegaconf import OmegaConf
-    cfg_path = os.path.expanduser('~/dev/diffusion_policy/diffusion_policy/config/task/lift_image.yaml')
+    cfg_path = os.path.expanduser('/n/holylabs/ydu_lab/Lab/zhangxiangcheng/code/SAILOR/diffusion_policy/diffusion_policy/config/task/libero_image.yaml')
     cfg = OmegaConf.load(cfg_path)
     shape_meta = cfg['shape_meta']
 
 
-    import robomimic.utils.file_utils as FileUtils
-    import robomimic.utils.env_utils as EnvUtils
-    from matplotlib import pyplot as plt
+    from diffusion_policy.common.libero_utils import get_env_details
 
-    dataset_path = os.path.expanduser('~/dev/diffusion_policy/data/robomimic/datasets/square/ph/image.hdf5')
-    env_meta = FileUtils.get_env_metadata_from_dataset(
-        dataset_path)
-
-    env = EnvUtils.create_env_from_metadata(
-        env_meta=env_meta,
-        render=False, 
-        render_offscreen=False,
-        use_image_obs=True, 
+    env_details = get_env_details(
+        benchmark_name=cfg['env_runner']['benchmark_name'],
+        task_indices=cfg['env_runner']['task_indices']
     )
+    env_meta = env_details['env_metas'][0]
+    
+    from libero.libero.envs.env_wrapper import ControlEnv
+    env_kwargs = {
+        "bddl_file_name": env_meta['bddl_file_name'],
+        "camera_heights": shape_meta['obs']['agentview_image']['shape'][1],
+        "camera_widths": shape_meta['obs']['agentview_image']['shape'][2],
+        "camera_segmentations": None,
+        "ignore_done": False,
+        "hard_reset": False,
+    }
+    env = ControlEnv(**env_kwargs).env
 
-    wrapper = RobomimicImageWrapper(
+    wrapper = LIBEROImageWrapper(
         env=env,
         shape_meta=shape_meta
     )
     wrapper.seed(0)
     obs = wrapper.reset()
     img = wrapper.render()
-    plt.imshow(img)
+    from PIL import Image
+    Image.fromarray(img).save('test_libero_image_wrapper.png')
 
 
     # states = list()
