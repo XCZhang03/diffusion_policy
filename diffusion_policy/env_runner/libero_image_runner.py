@@ -61,7 +61,6 @@ class LIBEROImageRunner(BaseImageRunner):
             benchmark_name=benchmark_name,
             task_indices=task_indices
         )
-        env_meta = env_details['env_metas'][0]
 
         def env_fn():
             env_meta = env_details['env_metas'][np.random.randint(len(env_details['env_metas']))]
@@ -99,6 +98,7 @@ class LIBEROImageRunner(BaseImageRunner):
         # a separate env_fn that does not create OpenGL context (enable_render=False)
         # is needed to initialize spaces.
         def dummy_env_fn():
+            env_meta = env_details['env_metas'][np.random.randint(len(env_details['env_metas']))]
             robomimic_env = create_env(
                     env_meta=env_meta, 
                     shape_meta=shape_meta,
