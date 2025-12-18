@@ -6,9 +6,18 @@ shape_meta: &shape_meta
     agentview_image:
       shape: [3, 128, 128]
       type: rgb
-    # robot0_eye_in_hand_image:
-    #   shape: [3, 128, 128]
-    #   type: rgb
+    robot0_eye_in_hand_image:
+      shape: [3, 128, 128]
+      type: rgb
+    birdview_image:
+      shape: [3, 128, 128]
+      type: rgb
+    sideview_image:
+      shape: [3, 128, 128]
+      type: rgb
+    frontview_image:
+      shape: [3, 128, 128]
+      type: rgb
     robot0_eef_pos:
       shape: [3]
       # type default: low_dim

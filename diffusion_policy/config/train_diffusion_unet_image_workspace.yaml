@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - task: libero_image
+  - task: libero_image_atomic
 
 name: train_diffusion_unet_image
 _target_: diffusion_policy.workspace.train_diffusion_unet_image_workspace.TrainDiffusionUnetImageWorkspace
@@ -37,9 +37,9 @@ policy:
     _target_: diffusion_policy.model.vision.multi_image_obs_encoder.MultiImageObsEncoder
     shape_meta: ${shape_meta}
     rgb_model:
-      _target_: diffusion_policy.model.vision.model_getter.get_resnet
+      _target_: diffusion_policy.model.vision.model_getter.get_r3m
       name: resnet18
-      weights: null
+      # weights: null
     resize_shape: null
     crop_shape: [76, 76]
     # constant center crop
@@ -73,14 +73,14 @@ ema:
 
 dataloader:
   batch_size: 64
-  num_workers: 4
+  num_workers: 0
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
   batch_size: 64
-  num_workers: 4
+  num_workers: 0
   shuffle: False
   pin_memory: True
   persistent_workers: False

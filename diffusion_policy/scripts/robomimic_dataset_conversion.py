@@ -31,7 +31,7 @@ def worker(x):
 @click.option('-i', '--input', required=True, help='input hdf5 path')
 @click.option('-o', '--output', required=True, help='output hdf5 path. Parent directory must exist')
 @click.option('-e', '--eval_dir', default=None, help='directory to output evaluation metrics')
-@click.option('-n', '--num_workers', default=None, type=int)
+@click.option('-n', '--num_workers', default=10, type=int)
 def main(input, output, eval_dir, num_workers):
     # process inputs
     input = pathlib.Path(input).expanduser()
@@ -62,7 +62,12 @@ def main(input, output, eval_dir, num_workers):
             abs_actions, info = results[i]
             demo = out_file[f'data/demo_{i}']
             demo['actions'][:] = abs_actions
-    
+        # reset env meta attr
+        import json
+        env_meta = json.loads(out_file['data'].attrs['env_args'])
+        env_meta['env_kwargs']['controller_configs']['control_delta'] = False
+        out_file['data'].attrs.modify('env_args', json.dumps(env_meta))
+
     # save eval
     if do_eval:
         eval_dir.mkdir(parents=False, exist_ok=True)

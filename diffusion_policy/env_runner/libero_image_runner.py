@@ -16,7 +16,7 @@ from diffusion_policy.gym_util.video_recording_wrapper import VideoRecordingWrap
 from diffusion_policy.policy.base_image_policy import BaseImagePolicy
 from diffusion_policy.common.pytorch_util import dict_apply
 from diffusion_policy.env_runner.base_image_runner import BaseImageRunner
-from diffusion_policy.env.libero.libero_image_wrapper import LIBEROImageWrapper
+from diffusion_policy.env.libero.libero_pose_wrapper import LIBEROPoseWrapper
 from diffusion_policy.common.libero_utils import get_env_details, create_env
 
 
@@ -64,14 +64,16 @@ class LIBEROImageRunner(BaseImageRunner):
 
         def env_fn():
             env_meta = env_details['env_metas'][np.random.randint(len(env_details['env_metas']))]
-            robomimic_env = create_env(
+            robomimic_env, empty_env = create_env(
                 env_meta=env_meta, 
                 shape_meta=shape_meta,
-                enable_render=True
+                enable_render=True,
+                empty_env=True
             )
             return MultiStepWrapper(
                 VideoRecordingWrapper(
-                    LIBEROImageWrapper(
+                    LIBEROPoseWrapper(
+                        empty_env=empty_env,
                         env=robomimic_env,
                         shape_meta=shape_meta,
                         init_state=None,
@@ -99,18 +101,21 @@ class LIBEROImageRunner(BaseImageRunner):
         # is needed to initialize spaces.
         def dummy_env_fn():
             env_meta = env_details['env_metas'][np.random.randint(len(env_details['env_metas']))]
-            robomimic_env = create_env(
+            robomimic_env, empty_env = create_env(
                     env_meta=env_meta, 
                     shape_meta=shape_meta,
-                    enable_render=False
+                    enable_render=False,
+                    empty_env=True
                 )
             return MultiStepWrapper(
                 VideoRecordingWrapper(
-                    LIBEROImageWrapper(
+                    LIBEROPoseWrapper(
+                        empty_env=empty_env,
                         env=robomimic_env,
                         shape_meta=shape_meta,
                         init_state=None,
-                        render_obs_key=render_obs_key
+                        render_obs_key=render_obs_key,
+                        compute_language_embedding=True
                     ),
                     video_recoder=VideoRecorder.create_h264(
                         fps=fps,
@@ -185,7 +190,7 @@ class LIBEROImageRunner(BaseImageRunner):
         # env = SyncVectorEnv(env_fns)
 
 
-        self.env_meta = env_meta
+        self.env_meta = env_details['env_metas'][0]
         self.env = env
         self.env_fns = env_fns
         self.env_seeds = env_seeds
@@ -235,7 +240,7 @@ class LIBEROImageRunner(BaseImageRunner):
             past_action = None
             policy.reset()
 
-            env_name = self.env_meta['env_name'] + '-' + '\n' + self.env_meta['parsed_problem']['language_instruction']
+            env_name = self.env_meta['env_name']
             pbar = tqdm.tqdm(total=self.max_steps, desc=f"Eval {env_name}Image {chunk_idx+1}/{n_chunks}", 
                 leave=False, mininterval=self.tqdm_interval_sec)
             

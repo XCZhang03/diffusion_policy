@@ -13,15 +13,16 @@ from diffusion_policy.gym_util.async_vector_env import AsyncVectorEnv
 from diffusion_policy.gym_util.sync_vector_env import SyncVectorEnv
 from diffusion_policy.gym_util.multistep_wrapper import MultiStepWrapper
 from diffusion_policy.gym_util.video_recording_wrapper import VideoRecordingWrapper, VideoRecorder
-from diffusion_policy.model.common.rotation_transformer import RotationTransformer
 
 from diffusion_policy.policy.base_image_policy import BaseImagePolicy
 from diffusion_policy.common.pytorch_util import dict_apply
 from diffusion_policy.env_runner.base_image_runner import BaseImageRunner
-from diffusion_policy.env.robomimic.robomimic_image_wrapper import RobomimicImageWrapper
+from diffusion_policy.env.robomimic.robomimic_pose_wrapper import RobomimicPoseWrapper
 import robomimic.utils.file_utils as FileUtils
 import robomimic.utils.env_utils as EnvUtils
 import robomimic.utils.obs_utils as ObsUtils
+
+import robosuite
 
 
 def create_env(env_meta, shape_meta, enable_render=True):
@@ -30,13 +31,32 @@ def create_env(env_meta, shape_meta, enable_render=True):
         modality_mapping[attr.get('type', 'low_dim')].append(key)
     ObsUtils.initialize_obs_modality_mapping_from_dict(modality_mapping)
 
-    env = EnvUtils.create_env_from_metadata(
-        env_meta=env_meta,
-        render=False, 
-        render_offscreen=enable_render,
-        use_image_obs=enable_render, 
-    )
-    return env
+    env_name = env_meta["env_name"]
+    env_type = EnvUtils.get_env_type(env_meta=env_meta)
+    env_kwargs = env_meta["env_kwargs"]
+    env_kwargs["env_name"] = env_name
+    env_kwargs["camera_heights"] = shape_meta['obs']['agentview_image']['shape'][1] 
+    env_kwargs["camera_widths"] = shape_meta['obs']['agentview_image']['shape'][2]
+    env_kwargs["use_image_obs"] = enable_render
+    env_kwargs["render_offscreen"] = enable_render
+    env_kwargs["render"] = False
+    env_kwargs['hard_reset'] = False
+    env = EnvUtils.create_env(
+        env_type=env_type,
+        **env_kwargs
+    ).env
+
+    empty_env_kwargs = env_kwargs.copy()
+    empty_env_kwargs['env_name'] = "SingleArmEmptyEnv"
+    empty_env_kwargs["use_image_obs"] = False
+    empty_env_kwargs["render_offscreen"] = False
+    empty_env_kwargs["render"] = False
+    empty_env_kwargs['hard_reset'] = False
+
+    empty_env = robosuite.make(**empty_env_kwargs)
+    empty_env.copy_env_model(env)
+
+    return env, empty_env
 
 
 class RobomimicImageRunner(BaseImageRunner):
@@ -83,21 +103,26 @@ class RobomimicImageRunner(BaseImageRunner):
 
         rotation_transformer = None
         if abs_action:
-            env_meta['env_kwargs']['controller_configs']['control_delta'] = False
+            from diffusion_policy.model.common.rotation_transformer import RotationTransformer
+            if robosuite.__version__ < "1.5":
+                env_meta['env_kwargs']['controller_configs']['control_delta'] = False
+            else:
+                env_meta['env_kwargs']['controller_configs']['body_parts']['right']['control_delta'] = False
             rotation_transformer = RotationTransformer('axis_angle', 'rotation_6d')
 
         def env_fn():
-            robomimic_env = create_env(
+            robomimic_env, empty_env = create_env(
                 env_meta=env_meta, 
                 shape_meta=shape_meta
             )
             # Robosuite's hard reset causes excessive memory consumption.
             # Disabled to run more envs.
             # https://github.com/ARISE-Initiative/robosuite/blob/92abf5595eddb3a845cd1093703e5a3ccd01e77e/robosuite/environments/base.py#L247-L248
-            robomimic_env.env.hard_reset = False
+            # robomimic_env.env.hard_reset = False
             return MultiStepWrapper(
                 VideoRecordingWrapper(
-                    RobomimicImageWrapper(
+                    RobomimicPoseWrapper(
+                        empty_env=empty_env,
                         env=robomimic_env,
                         shape_meta=shape_meta,
                         init_state=None,
@@ -124,14 +149,15 @@ class RobomimicImageRunner(BaseImageRunner):
         # a separate env_fn that does not create OpenGL context (enable_render=False)
         # is needed to initialize spaces.
         def dummy_env_fn():
-            robomimic_env = create_env(
+            robomimic_env, empty_env = create_env(
                     env_meta=env_meta, 
                     shape_meta=shape_meta,
                     enable_render=False
                 )
             return MultiStepWrapper(
                 VideoRecordingWrapper(
-                    RobomimicImageWrapper(
+                    RobomimicPoseWrapper(
+                        empty_env=empty_env,
                         env=robomimic_env,
                         shape_meta=shape_meta,
                         init_state=None,
@@ -175,12 +201,12 @@ class RobomimicImageRunner(BaseImageRunner):
                     if enable_render:
                         filename = pathlib.Path(output_dir).joinpath(
                             'media', wv.util.generate_id() + ".mp4")
-                        filename.parent.mkdir(parents=False, exist_ok=True)
+                        filename.parent.mkdir(parents=True, exist_ok=True)
                         filename = str(filename)
                         env.env.file_path = filename
 
                     # switch to init_state reset
-                    assert isinstance(env.env.env, RobomimicImageWrapper)
+                    assert isinstance(env.env.env, RobomimicPoseWrapper)
                     env.env.env.init_state = init_state
 
                 env_seeds.append(train_idx)
@@ -202,12 +228,12 @@ class RobomimicImageRunner(BaseImageRunner):
                 if enable_render:
                     filename = pathlib.Path(output_dir).joinpath(
                         'media', wv.util.generate_id() + ".mp4")
-                    filename.parent.mkdir(parents=False, exist_ok=True)
+                    filename.parent.mkdir(parents=True, exist_ok=True)
                     filename = str(filename)
                     env.env.file_path = filename
 
                 # switch to seed reset
-                assert isinstance(env.env.env, RobomimicImageWrapper)
+                assert isinstance(env.env.env, RobomimicPoseWrapper)
                 env.env.env.init_state = None
                 env.seed(seed)
 
@@ -215,8 +241,8 @@ class RobomimicImageRunner(BaseImageRunner):
             env_prefixs.append('test/')
             env_init_fn_dills.append(dill.dumps(init_fn))
 
-        env = AsyncVectorEnv(env_fns, dummy_env_fn=dummy_env_fn)
-        # env = SyncVectorEnv(env_fns)
+        # env = AsyncVectorEnv(env_fns, dummy_env_fn=dummy_env_fn)
+        env = SyncVectorEnv(env_fns)
 
 
         self.env_meta = env_meta

@@ -13,9 +13,11 @@ class LIBEROImageWrapper(gym.Env):
         shape_meta: dict,
         init_state: Optional[np.ndarray]=None,
         render_obs_key='agentview_image',
+        compute_language_embedding=False,
         ):
 
         self.env = env
+        self.parsed_problem = env.parsed_problem
         self.language_instruction = " ".join(env.parsed_problem['language_instruction'])
         self.problem_name = env.parsed_problem['problem_name']
         self.render_obs_key = render_obs_key
@@ -63,13 +65,32 @@ class LIBEROImageWrapper(gym.Env):
             observation_space[key] = this_space
         self.observation_space = observation_space
 
-        if 'lang_embed' in shape_meta['obs'].keys():
+        if 'lang_embed' in self.shape_meta['obs'].keys():
+            print('Language embedding observation detected.')
             from diffusion_policy.common.libero_utils import LANG_EMBED_CACHE_FILE
-            lang_embed_cache = dict(np.load(LANG_EMBED_CACHE_FILE)) if os.path.exists(LANG_EMBED_CACHE_FILE) else dict()
-            self.lang_embed = lang_embed_cache.get(self.language_instruction, None)
-            if self.lang_embed is None:
-                raise RuntimeError('Language embed not found in cache.')
+            def embed_lang(instruction: str) -> np.ndarray:
+                lang_embed_cache = dict(np.load(LANG_EMBED_CACHE_FILE)) if os.path.exists(LANG_EMBED_CACHE_FILE) else dict()
+                lang_embed = lang_embed_cache.get(instruction, None)
+                if lang_embed is not None:
+                    print('Loaded language embed from cache.')
+                if lang_embed is None:
+                    if not compute_language_embedding:
+                        raise RuntimeError('Language embed not found in cache.')
+                    from diffusion_policy.model.vision.model_getter import get_language_model
+                    lang_encode_fn = get_language_model()
+                    lang_embed = lang_encode_fn(instruction).astype(np.float32)
+                    lang_embed_cache[self.language_instruction] = lang_embed
+                    np.savez_compressed(LANG_EMBED_CACHE_FILE, **lang_embed_cache)
+                return lang_embed
+            self.embed_fn = embed_lang
+            self.set_lang_embed(self.language_instruction)
 
+    def set_lang_embed(self, instruction: str):
+        self.language_instruction = instruction
+        if "lang_embed" in self.shape_meta['obs'].keys():
+            print(f"Setting language instruction to: {instruction}")
+            self.lang_embed = self.embed_fn(instruction)
+            return instruction
 
     def get_observation(self, raw_obs=None):
         if raw_obs is None:

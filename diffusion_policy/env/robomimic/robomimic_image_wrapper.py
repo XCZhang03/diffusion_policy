@@ -1,14 +1,14 @@
 from typing import List, Optional
 from matplotlib.pyplot import fill
 import numpy as np
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium import spaces
 from omegaconf import OmegaConf
-from robomimic.envs.env_robosuite import EnvRobosuite
+from robosuite.environments.manipulation.manipulation_env import ManipulationEnv
 
 class RobomimicImageWrapper(gym.Env):
     def __init__(self, 
-        env: EnvRobosuite,
+        env: ManipulationEnv,
         shape_meta: dict,
         init_state: Optional[np.ndarray]=None,
         render_obs_key='agentview_image',
@@ -61,21 +61,30 @@ class RobomimicImageWrapper(gym.Env):
 
     def get_observation(self, raw_obs=None):
         if raw_obs is None:
-            raw_obs = self.env.get_observation()
+            raw_obs = self.env._get_observations(force_update=True)
         
-        self.render_cache = raw_obs[self.render_obs_key]
 
         obs = dict()
         for key in self.observation_space.keys():
             if key.endswith('image'):
-                obs[key] = np.moveaxis(raw_obs[key][::-1], -1, 0) / 255.0
+                obs[key] = np.moveaxis(raw_obs[key][::-1].copy(), -1, 0) / 255.0
             else:
                 obs[key] = raw_obs[key]
+        self.render_cache = obs[self.render_obs_key].copy()
         return obs
 
     def seed(self, seed=None):
         np.random.seed(seed=seed)
         self._seed = seed
+
+    def reset_to(self, mujoco_state: np.ndarray):
+        self.env.sim.set_state_from_flattened(mujoco_state)
+        self.env.sim.forward()
+        self.env._check_success()
+        # self.env._post_process()
+        self.env._update_observables(force=True)
+        raw_obs = self.env._get_observations()
+        return raw_obs
     
     def reset(self):
         if self.init_state is not None:
@@ -86,18 +95,18 @@ class RobomimicImageWrapper(gym.Env):
 
             # always reset to the same state
             # to be compatible with gym
-            raw_obs = self.env.reset_to({'states': self.init_state})
+            raw_obs = self.reset_to(self.init_state)
         elif self._seed is not None:
             # reset to a specific seed
             seed = self._seed
             if seed in self.seed_state_map:
                 # env.reset is expensive, use cache
-                raw_obs = self.env.reset_to({'states': self.seed_state_map[seed]})
+                raw_obs = self.reset_to(self.seed_state_map[seed])
             else:
                 # robosuite's initializes all use numpy global random state
                 np.random.seed(seed=seed)
                 raw_obs = self.env.reset()
-                state = self.env.get_state()['states']
+                state = np.array(self.env.sim.get_state().flatten())
                 self.seed_state_map[seed] = state
             self._seed = None
         else:
@@ -124,7 +133,7 @@ class RobomimicImageWrapper(gym.Env):
 def test():
     import os
     from omegaconf import OmegaConf
-    cfg_path = os.path.expanduser('~/dev/diffusion_policy/diffusion_policy/config/task/lift_image.yaml')
+    cfg_path = os.path.expanduser('diffusion_policy/config/task/lift_image_abs.yaml')
     cfg = OmegaConf.load(cfg_path)
     shape_meta = cfg['shape_meta']
 
@@ -133,7 +142,7 @@ def test():
     import robomimic.utils.env_utils as EnvUtils
     from matplotlib import pyplot as plt
 
-    dataset_path = os.path.expanduser('~/dev/diffusion_policy/data/robomimic/datasets/square/ph/image.hdf5')
+    dataset_path = os.path.expanduser('data/robomimic/datasets/lift/ph/image_abs.hdf5')
     env_meta = FileUtils.get_env_metadata_from_dataset(
         dataset_path)
 
@@ -142,7 +151,7 @@ def test():
         render=False, 
         render_offscreen=False,
         use_image_obs=True, 
-    )
+    ).env
 
     wrapper = RobomimicImageWrapper(
         env=env,
@@ -151,7 +160,8 @@ def test():
     wrapper.seed(0)
     obs = wrapper.reset()
     img = wrapper.render()
-    plt.imshow(img)
+    from PIL import Image
+    Image.fromarray(img).save('test_render.png')
 
 
     # states = list()
@@ -165,3 +175,6 @@ def test():
     # plt.imshow(img)
     # wrapper.seed()
     # states.append(wrapper.env.get_state()['states'])
+
+if __name__ == '__main__':
+    test()

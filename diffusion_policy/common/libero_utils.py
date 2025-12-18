@@ -93,7 +93,7 @@ def get_env_details(
         "benchmark": benchmark,
     }
 
-def create_env(env_meta, shape_meta, enable_render=True):
+def create_env(env_meta, shape_meta, enable_render=True, empty_env=False):
     # Robosuite's hard reset causes excessive memory consumption.
     # Disabled to run more envs.
     # https://github.com/ARISE-Initiative/robosuite/blob/92abf5595eddb3a845cd1093703e5a3ccd01e77e/robosuite/environments/base.py#L247-L248
@@ -107,17 +107,36 @@ def create_env(env_meta, shape_meta, enable_render=True):
         "use_camera_obs": enable_render,
         "has_offscreen_renderer": enable_render,
         "has_renderer": enable_render,
+        "camera_names": ["agentview", "frontview", "sideview", "birdview", "robot0_eye_in_hand"],
     }
     env = ControlEnv(**env_kwargs).env
+
+    if empty_env:
+        import robosuite as suite
+        empty_env_kwargs = env_meta['env_kwargs'].copy()
+        empty_env_kwargs['env_name'] = "SingleArmEmptyEnv"
+        empty_env_kwargs['hard_reset'] = False
+        empty_env_kwargs['has_offscreen_renderer'] = False
+        empty_env_kwargs['has_renderer'] = False
+        empty_env_kwargs['use_camera_obs'] = False
+        empty_env_kwargs['camera_names'] = ['agentview', 'frontview', 'sideview', 'birdview']
+        empty_env_kwargs['camera_heights'] = shape_meta['obs']['agentview_image']['shape'][1]
+        empty_env_kwargs['camera_widths'] = shape_meta['obs']['agentview_image']['shape'][2]
+        empty_env_kwargs['robots'] = [type(robot.robot_model).__name__ for robot in env.robots]
+        empty_env = suite.make(**empty_env_kwargs)
+        empty_env.copy_env_model(env)
+         
+        return env, empty_env
+
     return env
 
-def update_demo_keys(demo) -> Dict[str, Any]:
+def update_demo_keys(demo, low_dim_only=False) -> Dict[str, Any]:
         KEYS_MAP = {
             "agentview_rgb": "agentview_image",
             "eye_in_hand_rgb": "robot0_eye_in_hand_image",
             "joint_states": "robot0_joint_pos",
             "ee_pos": "robot0_eef_pos",
-            "ee_ori": "robot0_eef_ori",
+            "ee_ori": "robot0_eef_quat",
             "gripper_states": "robot0_gripper_qpos",
         }
         new_demo = {}
@@ -128,12 +147,17 @@ def update_demo_keys(demo) -> Dict[str, Any]:
             if key in KEYS_MAP.values():
                 continue
             if key in KEYS_MAP:
-                new_key = KEYS_MAP[key]
-                new_obs[new_key] = np.array(obs[key])
-                if 'rgb' in key:
-                    new_obs[new_key] = new_obs[new_key][:, ::-1, :, :]  # flip image
-        new_obs['robot0_eef_quat'] = [T.axisangle2quat(ori) for ori in new_obs['robot0_eef_ori']]
-        new_obs['robot0_eef_quat'] = np.array(new_obs['robot0_eef_quat'], dtype=np.float32)
+                if key.endswith('rgb'):
+                    if low_dim_only:
+                        continue
+                    new_obs[KEYS_MAP[key]] = np.array(obs[key])[:, ::-1, :, :]  # flip image
+                elif key.endswith('ori'):
+                    # handles orientation representation conversion if needed
+                    new_obs['robot0_eef_quat'] = [T.axisangle2quat(ori) for ori in obs['ee_ori'][:]]
+                    new_obs['robot0_eef_quat'] = np.array(new_obs['robot0_eef_quat'], dtype=np.float32)
+                else:
+                    new_obs[KEYS_MAP[key]] = np.array(obs[key])
+
         for key in new_obs:
             new_demo_key = 'obs/' + key
             new_demo[new_demo_key] = new_obs[key]

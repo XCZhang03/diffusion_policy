@@ -43,6 +43,7 @@ class LIBEROImageDataset(BaseImageDataset):
             pad_before=0,
             pad_after=0,
             n_obs_steps=None,
+            abs_action=False,
             rotation_rep='rotation_6d', # ignored when abs_action=False
             use_legacy_normalizer=False,
             use_cache=False,
@@ -50,6 +51,12 @@ class LIBEROImageDataset(BaseImageDataset):
             val_ratio=0.0,
             num_demos_per_task=None,
         ):
+        if abs_action:
+            # currently abs action not supported by libero
+            from diffusion_policy.model.common.rotation_transformer import RotationTransformer
+            rotation_transformer = RotationTransformer(
+            from_rep='axis_angle', to_rep=rotation_rep)
+
 
         self.lang_embed = False
         if "lang_embed" in shape_meta['obs']:
@@ -65,47 +72,50 @@ class LIBEROImageDataset(BaseImageDataset):
         env_metas = env_details['env_metas']
 
         # merge demos
-        demos = {}
-        index = 0
-        for dataset_path, env_meta in zip(dataset_paths, env_metas):
-            if self.lang_embed:
-                lang = env_meta['parsed_problem']['language_instruction']
-                self.lang_embed_cache = dict(np.load(LANG_EMBED_CACHE_FILE)) if os.path.exists(LANG_EMBED_CACHE_FILE) else dict()
-                if lang in self.lang_embed_cache:
-                    lang_embed = self.lang_embed_cache[lang]
-                else:
-                    lang_embed = self.lang_encode_fn(lang)
-                    self.lang_embed_cache[lang] = lang_embed
-                    np.savez(LANG_EMBED_CACHE_FILE, **self.lang_embed_cache)
-                    assert lang_embed.shape == shape_meta['obs']['lang_embed']['shape']
-            with h5py.File(dataset_path, 'r') as file:
-                n_demos = max(0, min(len(file['data']), int(num_demos_per_task))) if num_demos_per_task is not None else len(file['data'])
-                for i in range(n_demos):
-                    demos[f'demo_{index}'] = update_demo_keys(file['data'][f'demo_{i}'])
-                    if self.lang_embed:
-                        demos[f'demo_{index}']['obs/lang_embed'] = np.tile(
-                            lang_embed[None, :], 
-                            (demos[f'demo_{index}']['actions'].shape[0], 1)
-                        )
-                    index += 1
+        def load_demos():
+            demos = {}
+            index = 0
+            print('Loading demos from HDF5 files.', flush=True)
+            for dataset_path, env_meta in zip(dataset_paths, env_metas):
+                if self.lang_embed:
+                    lang = env_meta['parsed_problem']['language_instruction']
+                    lang_embed_cache = dict(np.load(LANG_EMBED_CACHE_FILE)) if os.path.exists(LANG_EMBED_CACHE_FILE) else dict()
+                    if lang in lang_embed_cache:
+                        lang_embed = lang_embed_cache[lang]
+                    else:
+                        lang_embed = self.lang_encode_fn(lang)
+                        lang_embed_cache[lang] = lang_embed
+                        np.savez(LANG_EMBED_CACHE_FILE, **lang_embed_cache)
+                        assert lang_embed.shape == shape_meta['obs']['lang_embed']['shape']
+                with h5py.File(dataset_path, 'r') as file:
+                    n_demos = max(0, min(len(file['data']), int(num_demos_per_task))) if num_demos_per_task is not None else len(file['data'])
+                    for i in tqdm(range(n_demos), desc=f'Loading demos from {os.path.basename(dataset_path)}'):
+                        demos[f'demo_{index}'] = update_demo_keys(file['data'][f'demo_{i}'])
+                        if self.lang_embed:
+                            demos[f'demo_{index}']['obs/lang_embed'] = np.tile(
+                                lang_embed[None, :], 
+                                (demos[f'demo_{index}']['actions'].shape[0], 1)
+                            )
+                        index += 1
+            return demos
         
 
         replay_buffer = None
         if use_cache:
-            cache_zarr_path = os.path.join(DATA_CACHE_DIR, (benchmark_name + '-' + str(task_indices) + '.zarr.zip'))
+            cache_zarr_path = os.path.join(DATA_CACHE_DIR, (benchmark_name + '-' + str(task_indices) + '*' + str(num_demos_per_task) + '.zarr.zip'))
             cache_lock_path = cache_zarr_path + '.lock'
             print('Acquiring lock on cache.')
             with FileLock(cache_lock_path):
                 if not os.path.exists(cache_zarr_path):
                     # cache does not exists
                     try:
-                        print('Cache does not exist. Creating!')
+                        print('Cache does not exist. Creating!', flush=True)
                         # store = zarr.DirectoryStore(cache_zarr_path)
                         replay_buffer = _convert_libero_to_replay(
                             store=zarr.MemoryStore(),
                             shape_meta=shape_meta,
-                            demos=demos)
-                        print(f'Saving cache to disk {cache_zarr_path}.')
+                            demos=load_demos())
+                        print(f'Saving cache to disk {cache_zarr_path}.', flush=True)
                         with zarr.ZipStore(cache_zarr_path) as zip_store:
                             replay_buffer.save_to_store(
                                 store=zip_store
@@ -114,7 +124,7 @@ class LIBEROImageDataset(BaseImageDataset):
                         shutil.rmtree(cache_zarr_path)
                         raise e
                 else:
-                    print('Loading cached ReplayBuffer from Disk.')
+                    print('Loading cached ReplayBuffer from Disk.', flush=True)
                     with zarr.ZipStore(cache_zarr_path, mode='r') as zip_store:
                         replay_buffer = ReplayBuffer.copy_from_store(
                             src_store=zip_store, store=zarr.MemoryStore())
@@ -123,8 +133,8 @@ class LIBEROImageDataset(BaseImageDataset):
             replay_buffer = _convert_libero_to_replay(
                 store=zarr.MemoryStore(),
                 shape_meta=shape_meta,
-                demos=demos)
-        print(f"Dataset has {replay_buffer.n_episodes} episodes, {replay_buffer.n_steps} steps.")
+                demos=load_demos())
+        print(f"Dataset has {replay_buffer.n_episodes} episodes, {replay_buffer.n_steps} steps.", flush=True)
 
         rgb_keys = list()
         lowdim_keys = list()

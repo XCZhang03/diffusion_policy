@@ -164,7 +164,7 @@ class AsyncVectorEnv(VectorEnv):
                 child_pipe.close()
 
         self._state = AsyncState.DEFAULT
-        self._check_observation_spaces()
+        # self._check_observation_spaces()
 
     def seed(self, seeds=None):
         self._assert_is_running()
