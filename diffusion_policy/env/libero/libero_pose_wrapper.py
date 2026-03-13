@@ -25,6 +25,10 @@ class LIBEROPoseWrapper(LIBEROImageWrapper):
         )
         self.empty_env = empty_env
 
+    @property
+    def unwrapped(self):
+        return self.env
+
     def set_robot(self, robot_state=None):
         return self.empty_env.copy_robot_state(env=self.env if robot_state is None else None, robot_state=robot_state)
     

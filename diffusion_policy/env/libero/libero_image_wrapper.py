@@ -92,9 +92,11 @@ class LIBEROImageWrapper(gym.Env):
             self.lang_embed = self.embed_fn(instruction)
             return instruction
 
-    def get_observation(self, raw_obs=None):
+    def get_observation(self, raw_obs=None, return_raw=False):
         if raw_obs is None:
-            raw_obs = self.env.get_observation()
+            raw_obs = self.env._get_observations()
+        if return_raw:
+            return raw_obs
 
         self.render_cache = raw_obs[self.render_obs_key][::-1]
 

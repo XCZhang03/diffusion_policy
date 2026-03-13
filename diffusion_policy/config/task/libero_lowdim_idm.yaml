@@ -9,11 +9,14 @@ shape_meta: &shape_meta
     robot0_gripper_qpos:
       shape: [2]
       type: qpos
+    robot0_eef_quat:
+      shape: [4]
+      type: rot
   action: 
     shape: [7]
 
 benchmark_name: &benchmark_name libero_90
-task_indices: &task_indices 1-40
+task_indices: &task_indices 0-89
 abs_action: &abs_action False
 
 # env_runner:
@@ -54,4 +57,4 @@ dataset:
   use_cache: True
   seed: 42
   val_ratio: 0.02
-  num_demos_per_task: 30
+  num_demos_per_task: null

@@ -47,7 +47,7 @@ class LowdimIDMObsEncoder(ModuleAttrMixin):
                 assert key.endswith('pos'), f"Expected pos key to end with 'pos', got {key}"
                 pos_keys[key] = shape
             elif type == 'rot':
-                raise NotImplementedError("Rotation type is not supported in InverseDynamicsStateEncoder.")
+                # raise NotImplementedError("Rotation type is not supported in InverseDynamicsStateEncoder.")
                 rot_keys[key] = shape
                 assert get_rot_rep(key) == rotation_rep == 'quaternion', \
                     "Only quaternion rotation representation is supported currently."
@@ -69,7 +69,7 @@ class LowdimIDMObsEncoder(ModuleAttrMixin):
         for key in self.key_shape_map:
             shape = self.key_shape_map[key]
             if key in self.rot_keys:
-                zero_obs[key] = torch.tensor([[1.0, 0.0, 0.0, 0.0]] * batch_size, device=self.device, dtype=self.dtype)
+                zero_obs[key] = torch.tensor([[0,0,0,1]] * batch_size, device=self.device, dtype=self.dtype)
             else:
                 zero_obs[key] = torch.zeros((batch_size,)+shape, device=self.device, dtype=self.dtype)
         return zero_obs
@@ -94,10 +94,12 @@ class LowdimIDMObsEncoder(ModuleAttrMixin):
         if not self.use_delta:
             for key in self.key_shape_map.keys():
                 if key in self.rot_keys:
-                    cond_dict[key] = T.quat_multiply(
-                        cond_dict[key],
-                        obs_dict[key]
-                    )
+                    cond_dict[key] = torch.tensor(np.stack([
+                        T.quat_multiply(
+                            cond_dict[key][i].tolist(),
+                            obs_dict[key][i].tolist()
+                        ) for i in range(cond_dict[key].shape[0])
+                    ], axis=0)).to(device=self.device, dtype=self.dtype)
                 else:
                     cond_dict[key] = cond_dict[key] + obs_dict[key]
 

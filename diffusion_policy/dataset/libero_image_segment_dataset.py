@@ -114,11 +114,13 @@ class LIBEROImageSegmentDataset(BaseImageDataset):
             print('Loading demos from HDF5 files with parallel dataset processing.', flush=True)
 
             # Process datasets in parallel
-            max_workers = min(len(dataset_paths), multiprocessing.cpu_count())
+            max_workers = min(len(dataset_paths), 1)
             
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 dataset_futures = [executor.submit(process_dataset, dataset_path) for dataset_path in dataset_paths]
-                for future in concurrent.futures.as_completed(dataset_futures):
+                for future in tqdm(concurrent.futures.as_completed(dataset_futures),
+                                   total=len(dataset_futures),
+                                   desc="Processing datasets"):
                     dataset_demos = future.result()
                     demos.extend(dataset_demos)
             
@@ -127,7 +129,7 @@ class LIBEROImageSegmentDataset(BaseImageDataset):
 
         replay_buffer = None
         if use_cache:
-            cache_zarr_path = os.path.join(DATA_CACHE_DIR, (benchmark_name + '-' + str(task_indices) + '*' + str(num_demos_per_task) + 'libero_atomic_segment' + instructions +'.zarr.zip'))
+            cache_zarr_path = os.path.join(DATA_CACHE_DIR, (benchmark_name + '-' + str(task_indices) + '*' + str(num_demos_per_task) + 'libero_atomic_segment' + str(instructions) +'.zarr.zip'))
             cache_lock_path = cache_zarr_path + '.lock'
             print('Acquiring lock on cache.')
             with FileLock(cache_lock_path):
@@ -269,7 +271,6 @@ class LIBEROImageSegmentDataset(BaseImageDataset):
         return len(self.sampler)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        threadpool_limits(1)
         data = self.sampler.sample_sequence(idx)
 
         # to save RAM, only return first n_obs_steps of OBS

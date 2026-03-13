@@ -34,6 +34,26 @@ register_codecs()
 from diffusion_policy.common.libero_utils import CACHE_DIR
 DATA_CACHE_DIR = os.path.join(CACHE_DIR, 'data/')
 
+
+def process_dataset_chunk(args):
+    """Process a chunk of demos from a single dataset file."""
+    dataset_path, env_meta, demo_indices, start_index, lang_embed = args
+    chunk_demos = {}
+    
+    with h5py.File(dataset_path, 'r') as file:
+        for i, demo_idx in enumerate(demo_indices):
+            global_idx = start_index + i
+            demo_data = update_demo_keys(file['data'][f'demo_{demo_idx}'])
+            if lang_embed is not None:
+                demo_data['obs/lang_embed'] = np.tile(
+                    lang_embed[None, :], 
+                    (demo_data['actions'].shape[0], 1)
+                )
+            chunk_demos[f'demo_{global_idx}'] = demo_data
+    
+    return chunk_demos
+
+
 class LIBEROImageDataset(BaseImageDataset):
     def __init__(self,
             shape_meta: dict,
@@ -73,31 +93,63 @@ class LIBEROImageDataset(BaseImageDataset):
 
         # merge demos
         def load_demos():
-            demos = {}
+            all_demos = {}
             index = 0
             print('Loading demos from HDF5 files.', flush=True)
-            for dataset_path, env_meta in zip(dataset_paths, env_metas):
-                if self.lang_embed:
+            
+            # Pre-compute language embeddings if needed
+            lang_embeds = []
+            if self.lang_embed:
+                lang_embed_cache = dict(np.load(LANG_EMBED_CACHE_FILE)) if os.path.exists(LANG_EMBED_CACHE_FILE) else dict()
+                cache_updated = False
+                
+                for env_meta in env_metas:
                     lang = env_meta['parsed_problem']['language_instruction']
-                    lang_embed_cache = dict(np.load(LANG_EMBED_CACHE_FILE)) if os.path.exists(LANG_EMBED_CACHE_FILE) else dict()
                     if lang in lang_embed_cache:
-                        lang_embed = lang_embed_cache[lang]
+                        lang_embeds.append(lang_embed_cache[lang])
                     else:
                         lang_embed = self.lang_encode_fn(lang)
                         lang_embed_cache[lang] = lang_embed
-                        np.savez(LANG_EMBED_CACHE_FILE, **lang_embed_cache)
+                        lang_embeds.append(lang_embed)
+                        cache_updated = True
                         assert lang_embed.shape == shape_meta['obs']['lang_embed']['shape']
+                
+                if cache_updated:
+                    np.savez(LANG_EMBED_CACHE_FILE, **lang_embed_cache)
+            else:
+                lang_embeds = [None] * len(env_metas)
+            
+            # Prepare tasks for multiprocessing
+            tasks = []
+            for dataset_path, env_meta, lang_embed in zip(dataset_paths, env_metas, lang_embeds):
                 with h5py.File(dataset_path, 'r') as file:
                     n_demos = max(0, min(len(file['data']), int(num_demos_per_task))) if num_demos_per_task is not None else len(file['data'])
-                    for i in tqdm(range(n_demos), desc=f'Loading demos from {os.path.basename(dataset_path)}'):
-                        demos[f'demo_{index}'] = update_demo_keys(file['data'][f'demo_{i}'])
-                        if self.lang_embed:
-                            demos[f'demo_{index}']['obs/lang_embed'] = np.tile(
-                                lang_embed[None, :], 
-                                (demos[f'demo_{index}']['actions'].shape[0], 1)
-                            )
-                        index += 1
-            return demos
+                    if n_demos > 0:
+                        demo_indices = list(range(n_demos))
+                        tasks.append((dataset_path, env_meta, demo_indices, index, lang_embed))
+                        index += n_demos
+            
+            # Process datasets in parallel
+            max_workers = min(len(tasks), multiprocessing.cpu_count(), 16)
+            if max_workers > 1:
+                print(f'Processing {len(tasks)} dataset files in parallel with {max_workers} workers.', flush=True)
+                with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+                    results = list(tqdm(
+                        executor.map(process_dataset_chunk, tasks),
+                        total=len(tasks),
+                        desc='Transforming datasets'
+                    ))
+                
+                # Merge results
+                for chunk_demos in results:
+                    all_demos.update(chunk_demos)
+            else:
+                # Fallback to sequential processing if only one task
+                for task in tqdm(tasks, desc='Processing tasks sequentially'):
+                    chunk_demos = process_dataset_chunk(task)
+                    all_demos.update(chunk_demos)
+            
+            return all_demos
         
 
         replay_buffer = None
@@ -244,7 +296,7 @@ class LIBEROImageDataset(BaseImageDataset):
         return len(self.sampler)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        threadpool_limits(1)
+        # threadpool_limits(1)
         data = self.sampler.sample_sequence(idx)
 
         # to save RAM, only return first n_obs_steps of OBS
@@ -277,7 +329,8 @@ def _convert_libero_to_replay(store, shape_meta, demos, n_workers=None,
             max_inflight_tasks=None, num_demos_per_task=None) -> ReplayBuffer:
 
     if n_workers is None:
-        n_workers = multiprocessing.cpu_count()
+        n_workers = min(multiprocessing.cpu_count(), 64)
+    print(f'Using {n_workers} workers to process data in parallel.', flush=True)
     if max_inflight_tasks is None:
         max_inflight_tasks = n_workers * 5
 

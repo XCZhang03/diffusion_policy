@@ -11,7 +11,7 @@ from libero.libero.envs.bddl_utils import robosuite_parse_problem
 
 MAX_INSTRUCTION_LENGTH = 256
 
-CACHE_DIR = "/n/holylabs/ydu_lab/Lab/zhangxiangcheng/code/SAILOR/scratch_dir/libero_cache"
+CACHE_DIR = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/scratch_dir/libero_cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 LANG_EMBED_CACHE_FILE = os.path.join(CACHE_DIR, 'lang_embed_cache.npz')
@@ -107,7 +107,7 @@ def create_env(env_meta, shape_meta, enable_render=True, empty_env=False):
         "use_camera_obs": enable_render,
         "has_offscreen_renderer": enable_render,
         "has_renderer": enable_render,
-        "camera_names": ["agentview", "frontview", "sideview", "birdview", "robot0_eye_in_hand"],
+        "camera_names": ["agentview", "frontview", "sideview", "birdview", "robot0_eye_in_hand", "canonical_frontview"],
     }
     env = ControlEnv(**env_kwargs).env
 
@@ -119,7 +119,7 @@ def create_env(env_meta, shape_meta, enable_render=True, empty_env=False):
         empty_env_kwargs['has_offscreen_renderer'] = False
         empty_env_kwargs['has_renderer'] = False
         empty_env_kwargs['use_camera_obs'] = False
-        empty_env_kwargs['camera_names'] = ['agentview', 'frontview', 'sideview', 'birdview']
+        empty_env_kwargs['camera_names'] = ['agentview', 'frontview', 'sideview', 'birdview', 'canonical_frontview', 'robot0_eye_in_hand']
         empty_env_kwargs['camera_heights'] = shape_meta['obs']['agentview_image']['shape'][1]
         empty_env_kwargs['camera_widths'] = shape_meta['obs']['agentview_image']['shape'][2]
         empty_env_kwargs['robots'] = [type(robot.robot_model).__name__ for robot in env.robots]

@@ -21,7 +21,7 @@ OmegaConf.register_new_resolver("eval", eval, replace=True)
     version_base=None,
     config_path=str(pathlib.Path(__file__).parent.joinpath(
         'diffusion_policy','config')),
-    config_name='train_diffusion_unet_image_workspace'
+    config_name='train_diffusion_transformer_hybrid_workspace'
 )
 def main(cfg: OmegaConf):
     # resolve immediately so all the ${now:} resolvers

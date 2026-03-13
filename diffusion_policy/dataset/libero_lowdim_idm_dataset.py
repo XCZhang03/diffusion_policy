@@ -93,7 +93,8 @@ class LIBEROLowdimIDMDataset(BaseLowdimDataset):
             elif type == 'pos':
                 pos_keys.append(key)
             elif type == 'rot':
-                raise NotImplementedError("Rotation type is not supported in InverseDynamicsStateEncoder.")
+                # raise NotImplementedError("Rotation type is not supported in InverseDynamicsStateEncoder.")
+                rot_keys.append(key)
 
         val_mask = get_val_mask(
             n_episodes=replay_buffer.n_episodes, 
@@ -167,7 +168,6 @@ class LIBEROLowdimIDMDataset(BaseLowdimDataset):
         return len(self.sampler)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        threadpool_limits(1)
         data = self.sampler.sample_sequence(idx)
 
         # to save RAM, only return first n_obs_steps of OBS
