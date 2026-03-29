@@ -294,7 +294,7 @@ class TrainDiffusionUnetLowdimIDMWorkspace(BaseWorkspace):
     config_path=str(pathlib.Path(__file__).parent.parent.joinpath("config")), 
     config_name=pathlib.Path(__file__).stem)
 def main(cfg):
-    workspace = TrainDiffusionUnetLowdimIDMWorkspace(cfg)
+    workspace = TrainDiffusionUnetLowdimIDMWorkspace(cfg, "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.11/21.52.52_train_diffusion_unet_lowdim_idm_libero_idm")
     workspace.run()
 
 if __name__ == "__main__":

@@ -41,9 +41,10 @@ def process_dataset_chunk(args):
     chunk_demos = {}
     
     with h5py.File(dataset_path, 'r') as file:
-        for i, demo_idx in enumerate(demo_indices):
+        for i in range(len(demo_indices)):
+            demo_idx = list(file['data'].keys())[i]
             global_idx = start_index + i
-            demo_data = update_demo_keys(file['data'][f'demo_{demo_idx}'])
+            demo_data = update_demo_keys(file['data'][demo_idx])
             if lang_embed is not None:
                 demo_data['obs/lang_embed'] = np.tile(
                     lang_embed[None, :], 

@@ -15,8 +15,8 @@ shape_meta: &shape_meta
   action: 
     shape: [7]
 
-benchmark_name: &benchmark_name libero_90
-task_indices: &task_indices 0-89
+benchmark_name: &benchmark_name libero_object
+task_indices: &task_indices 0-9
 abs_action: &abs_action False
 
 # env_runner:

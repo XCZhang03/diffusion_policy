@@ -29,7 +29,7 @@ def main(cfg: OmegaConf):
     OmegaConf.resolve(cfg)
 
     cls = hydra.utils.get_class(cfg._target_)
-    workspace: BaseWorkspace = cls(cfg)
+    workspace: BaseWorkspace = cls(cfg, "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.21/08.10.38_train_diffusion_transformer_hybrid_libero_image")
     workspace.run()
 
 if __name__ == "__main__":

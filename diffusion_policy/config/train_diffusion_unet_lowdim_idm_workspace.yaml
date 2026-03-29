@@ -10,7 +10,7 @@ shape_meta: ${task.shape_meta}
 exp_name: "default"
 
 n_obs_steps: 1
-n_action_steps: 40
+n_action_steps: 20
 n_latency_steps: 0
 past_action_visible: False
 keypoint_visible_rate: 1.0

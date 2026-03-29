@@ -9,7 +9,7 @@ task_name: ${task.name}
 shape_meta: ${task.shape_meta}
 exp_name: "default"
 
-horizon: 20
+horizon: 40
 n_obs_steps: 1
 n_action_steps: 20
 n_latency_steps: 0
@@ -45,7 +45,7 @@ policy:
   n_layer: 12
   n_cond_layers: 0  # >0: use transformer encoder for cond, otherwise use MLP
   n_head: 8
-  n_emb: 256
+  n_emb: 512
   p_drop_emb: 0.0
   p_drop_attn: 0.3
   causal_attn: True
@@ -99,9 +99,9 @@ training:
   use_ema: True
   # training loop control
   # in epochs
-  rollout_every: 10
-  checkpoint_every: 10
-  val_every: 1
+  rollout_every: 5
+  checkpoint_every: 5
+  val_every: 2
   sample_every: 2
   # steps per epoch
   max_train_steps: null
@@ -122,7 +122,7 @@ checkpoint:
   topk:
     monitor_key: test_mean_score
     mode: max
-    k: 5
+    k: 15
     format_str: 'epoch={epoch:04d}-test_mean_score={test_mean_score:.3f}.ckpt'
   save_last_ckpt: True
   save_last_snapshot: False

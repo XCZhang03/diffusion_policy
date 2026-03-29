@@ -18,20 +18,20 @@ shape_meta: &shape_meta
     # frontview_image:
     #   shape: [3, 128, 128]
     #   type: rgb
-    robot0_eef_pos:
-      shape: [3]
-      # type default: low_dim
-    robot0_eef_quat:
-      shape: [4]
-    robot0_gripper_qpos:
-      shape: [2]
+    # robot0_eef_pos:
+    #   shape: [3]
+    #   # type default: low_dim
+    # robot0_eef_quat:
+    #   shape: [4]
+    # robot0_gripper_qpos:
+    #   shape: [2]
     lang_embed:
       shape: [768]
   action: 
     shape: [7]
 
-benchmark_name: &benchmark_name libero_90
-task_indices: &task_indices 18,19,20,38,39
+benchmark_name: &benchmark_name libero_object
+task_indices: &task_indices 0-9
 abs_action: &abs_action False
 
 env_runner:
@@ -72,4 +72,4 @@ dataset:
   use_cache: True
   seed: 42
   val_ratio: 0.02
-  num_demos_per_task: 50
+  num_demos_per_task: null
